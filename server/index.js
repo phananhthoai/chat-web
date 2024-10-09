@@ -7,15 +7,23 @@ const http = require('http').Server(app);
 const cors = require('cors');
 const socketIO = require('socket.io')(http, {
   cors: {
-      origin: "http://localhost:3000"
+      origin: "*"
   }
 });
 app.use(cors());
 
 socketIO.on('connection', (socket) => {
   console.log(`⚡: ${socket.id} user just connected!`);
-  socket.on ('message', (data) => {
-    console.log(data);
+  socket.on('newUser', (data) => {
+    socketIO.emit('messageResponse', {
+      name: 'bot',
+      text: 'A new user ' + data.userName,
+    });
+  });
+  socket.on('typing', (data) => socket.broadcast.emit('typingResponse', data));
+  socket.on('message', (data) => {
+    console.log(data)
+    socketIO.emit('messageResponse', data);
   });
   socket.on('disconnect', () => {
     console.log('🔥: A user disconnected');
