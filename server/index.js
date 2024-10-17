@@ -16,7 +16,7 @@ const jwt = require('jsonwebtoken');
 app.use(cors());
 app.use(express.json());
 
-mongoose.connect('mongodb://root:example@172.17.0.3:27017/chatapp', {
+mongoose.connect('mongodb://root:example@172.17.0.4:27017/chatapp', {
     useNewUrlParser: true,
     useUnifiedTopology: true,
     authSource: 'admin'
@@ -75,23 +75,37 @@ app.post('/signin', async (req, res) => {
     res.json({token});
 });
 
-let users = {};
+const users = new Map();
+
 socketIO.on('connection', (socket) => {
     console.log(`⚡: ${socket.id} user just connected!`);
     socket.on('newUser', (data) => {
-        socketIO.emit('messageResponse', {
-            name: 'bot',
-            text: 'A new user ' + data.userName,
-        });
-        users[data.userName] = data;
-        // console.log(users);
-        //Sends the list of users to the client
-        socketIO.emit('newUserResponse', Object.values(users));
+        if (!data.userName) return;
+
+        // Kiểm tra xem user đã tồn tại chưa
+        const existingUser = Array.from(users.values()).find(user => user.userName === data.userName);
+        if (existingUser) {
+            // Nếu user đã tồn tại, cập nhật socketID
+            users.delete(existingUser.socketID);
+            existingUser.socketID = socket.id;
+            users.set(socket.id, existingUser);
+        } else {
+            // Nếu là user mới, thêm vào Map
+            users.set(socket.id, { ...data, socketID: socket.id });
+            socketIO.emit('messageResponse', {
+                name: 'bot',
+                text: 'A new user ' + data.userName,
+            });
+        }
+
+        socketIO.emit('newUserResponse', Array.from(users.values()));
     });
-    socket.on('typing', (data) => socket.broadcast.emit('typingResponse', data));
+    socket.on('typing', (data) => {
+        socket.broadcast.emit('typingResponse', data)
+    });
 
     socket.on('hello', () => {
-        socket.emit('newUserResponse', Object.values(users));
+        socket.emit('newUserResponse', Array.from(users.values()));
     });
     socket.on('message', (data) => {
         console.log(data)
@@ -105,8 +119,33 @@ socketIO.on('connection', (socket) => {
         });
         callback({ status: 'File uploaded successfully' });
     });
+
+    socket.on('leaveChat', () => {
+        if (users.has(socket.id)) {
+            const userName = users.get(socket.id).userName;
+            users.delete(socket.id);
+            socketIO.emit('userLeft', { socketID: socket.id, userName: userName });
+            socketIO.emit('newUserResponse', Array.from(users.values()));
+            socketIO.emit('messageResponse', {
+                name: 'bot',
+                text: userName + ' has left the chat',
+            });
+        }
+    });
+
+
     socket.on('disconnect', () => {
         console.log('🔥: A user disconnected');
+        if (users.has(socket.id)) {
+            const userName = users.get(socket.id).userName;
+            users.delete(socket.id);
+            socketIO.emit('userLeft', { socketID: socket.id, userName: userName });
+            socketIO.emit('newUserResponse', Array.from(users.values()));
+            socketIO.emit('messageResponse', {
+                name: 'bot',
+                text: userName + ' has disconnected',
+            });
+        }
     });
 });
 
